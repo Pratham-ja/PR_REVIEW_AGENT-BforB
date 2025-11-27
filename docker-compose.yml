@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: pr-review-db
+    environment:
+      POSTGRES_DB: pr_review_agent
+      POSTGRES_USER: pr_review_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pr_review_user -d pr_review_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - pr-review-network
+
+  # PR Review Agent API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pr-review-api
+    environment:
+      # Database
+      DATABASE_URL: postgresql+asyncpg://pr_review_user:${POSTGRES_PASSWORD:-changeme}@postgres:5432/pr_review_agent
+      
+      # GitHub
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      
+      # LLM Configuration
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4}
+      
+      # API Configuration
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      API_RATE_LIMIT: ${API_RATE_LIMIT:-10}
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      
+      # Agent Configuration
+      AGENT_TIMEOUT: ${AGENT_TIMEOUT:-30}
+      MAX_FILES_PER_REVIEW: ${MAX_FILES_PER_REVIEW:-50}
+      MAX_DIFF_LINES: ${MAX_DIFF_LINES:-10000}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - pr-review-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  pr-review-network:
+    driver: bridge
